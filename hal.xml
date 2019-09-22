@@ -1,0 +1,57 @@
+<?xml version="1.0" ?>
+<HAL>
+	<templates>
+		<template name="digio">
+			<pin type="io" initialstate="input" initialpullup="active" />
+		</template>
+
+		<template name="diginput">
+			<pin type="input" initialpullup="active" />
+		</template>
+
+		<template name="digswitchinput">
+			<pin type="input" initialpullup="active" />
+			<activelow />
+		</template>
+
+		<template name="digoutput">
+			<pin type="output" initialvalue="inactive" />
+		</template>
+		
+		<template name="digoutputinv">
+			<pin type="output" initialvalue="inactive" />
+			<activelow />
+		</template>
+
+		<template name="adcinput">
+			<pin type="input" initialpullup="inactive" />
+		</template>
+	</templates>
+
+	<portpin name="PE2" template="diginput">
+		<description value="DebugRX" />
+	</portpin>
+	<portpin name="PE3" template="digoutput">
+		<description value="DebugTX" />
+	</portpin>
+
+	<portpin name="PD7" template="digoutputinv">
+		<description value="SCK" />
+	</portpin>
+	<portpin name="PD5" template="digoutput">
+		<description value="MOSI" />
+	</portpin>
+	<portpin name="PD4" template="digoutputinv">
+		<description value="CS" />
+	</portpin>
+	<portpin name="PD1" template="digoutput">
+		<description value="LEDRingBrightness" />
+	</portpin>
+	<portpin name="PD0" template="digoutput">
+		<description value="LEDRing" />
+	</portpin>
+	<portpin name="PR0" template="digoutputinv">
+		<description value="DebugLED" />
+	</portpin>
+
+</HAL>

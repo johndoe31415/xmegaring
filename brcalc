@@ -1,0 +1,31 @@
+#!/usr/bin/python3
+#	xmegaring - RS232-controlled LED ring
+#	Copyright (C) 2019-2019 Johannes Bauer
+#
+#	This file is part of xmegaring.
+#
+#	xmegaring is free software; you can redistribute it and/or modify
+#	it under the terms of the GNU General Public License as published by
+#	the Free Software Foundation; this program is ONLY licensed under
+#	version 3 of the License, later versions are explicitly excluded.
+#
+#	xmegaring is distributed in the hope that it will be useful,
+#	but WITHOUT ANY WARRANTY; without even the implied warranty of
+#	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#	GNU General Public License for more details.
+#
+#	You should have received a copy of the GNU General Public License
+#	along with xmegaring; if not, write to the Free Software
+#	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+#	Johannes Bauer <JohannesBauer@gmx.de>
+
+fper = 25000000
+fbaud = 115200
+for bscale in range(-7, 8):
+	bsel = round(fper / (2 ** bscale) / 16 / fbaud) - 1
+	if bsel < 0:
+		bsel = 0
+	baudrate = fper / (2 ** bscale) / (16 * (bsel + 1))
+	if bsel < 4096:
+		print("BSEL %5d BSCALE %2d Baudrate %6.0f" % (bsel, bscale, baudrate))
