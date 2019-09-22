@@ -53,6 +53,23 @@ static void clock_configure_ext(void) {
 	OSC.CTRL &= ~OSC_RC2MEN_bm;
 }
 
+static void ledring_setbrightness(uint8_t brightness) {
+	TCD0.CCB = 255 - brightness;
+}
+
+static void ledring_init(void) {
+	LEDRing_SetActive();
+
+	/*
+	 * Single-slope PWM frequency of ~381 Hz
+	 * 25e6 / 256 / 256 = 381.5
+	 */
+	TCD0.CTRLA = TC_CLKSEL_DIV256_gc;
+	TCD0.CTRLB = TC0_CCBEN_bm | TC_WGMODE_SS_gc;
+	TCD0.PER = 255;
+	ledring_setbrightness(10);
+}
+
 static void ledring_send(uint32_t led_data) {
 	CS_SetActive();
 	spi_sendbyte(led_data >> 24);
@@ -89,17 +106,15 @@ int main(void) {
 	DebugLED_SetActive();
 	clock_configure_ext();
 	rs232_init();
+	ledring_init();
 
 	PMIC.CTRL = PMIC_LOLVLEN_bm;
 	sei();
 
-	LEDRing_SetActive();
-	LEDRingBrightness_SetInactive();
 	uint32_t x = 0xaa550000;
 	while (true) {
 		x++;
 		ledring_send(x);
-//		rs232_send((x & 0x1f) + 'A');
 		_delay_ms(100);
 	}
 }
