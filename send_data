@@ -1,0 +1,59 @@
+#!/usr/bin/python3
+#	xmegaring - RS232-controlled LED ring
+#	Copyright (C) 2019-2019 Johannes Bauer
+#
+#	This file is part of xmegaring.
+#
+#	xmegaring is free software; you can redistribute it and/or modify
+#	it under the terms of the GNU General Public License as published by
+#	the Free Software Foundation; this program is ONLY licensed under
+#	version 3 of the License, later versions are explicitly excluded.
+#
+#	xmegaring is distributed in the hope that it will be useful,
+#	but WITHOUT ANY WARRANTY; without even the implied warranty of
+#	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#	GNU General Public License for more details.
+#
+#	You should have received a copy of the GNU General Public License
+#	along with xmegaring; if not, write to the Free Software
+#	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+#	Johannes Bauer <JohannesBauer@gmx.de>
+
+import serial
+from NamedStruct import NamedStruct
+from CRCCCITT import CRCCCITT
+
+packet = NamedStruct((
+	("B", "sof"),
+	("B", "ring1_brightness"),
+	("L", "ring1_config"),
+	("B", "eof"),
+	("H", "crc"),
+))
+
+def pack_data(payload_data):
+	data = dict(payload_data)
+	data.update({
+		"sof":	0x5a,
+		"eof":	0xa5,
+		"crc":	0,
+	})
+	frame = packet.pack(data)
+	crc = CRCCCITT.calculate(frame[:-2])
+	data["crc"] = crc
+	frame = packet.pack(data)
+	return frame
+
+data = {
+	"ring1_brightness":		30,
+	"ring1_config":			0x1,
+}
+
+conn = serial.Serial("/dev/ttyUSB0", baudrate = 115200, timeout = 0.25)
+i = 0
+while True:
+	i = (i + 1) % 32
+	conn.write(pack_data(data))
+	data["ring1_config"] = 1 << i
+	print(conn.read(128))

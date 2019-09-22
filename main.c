@@ -25,7 +25,30 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
+#include <util/crc16.h>
 #include "hal.h"
+
+#define SOF_BYTE		0x5a
+#define EOF_BYTE		0xa5
+
+struct ledring_config_t {
+	uint8_t brightness;
+	uint32_t configuration;
+} __attribute__ ((packed));
+
+struct rx_command_payload_t {
+	uint8_t sof;
+	struct ledring_config_t ledring;
+	uint8_t eof;
+} __attribute__ ((packed));
+
+struct rx_command_t {
+	struct rx_command_payload_t payload;
+	uint16_t crc;
+} ;
+
+static struct rx_command_t rx_command;
+static uint8_t rx_buf_length;
 
 static void spi_sendbyte(uint8_t value) {
 	for (uint8_t i = 0; i < 8; i++) {
@@ -57,6 +80,15 @@ static void ledring_setbrightness(uint8_t brightness) {
 	TCD0.CCB = 255 - brightness;
 }
 
+static void ledring_send(uint32_t led_data) {
+	CS_SetActive();
+	spi_sendbyte(led_data >> 0);
+	spi_sendbyte(led_data >> 8);
+	spi_sendbyte(led_data >> 16);
+	spi_sendbyte(led_data >> 24);
+	CS_SetInactive();
+}
+
 static void ledring_init(void) {
 	LEDRing_SetActive();
 
@@ -67,16 +99,8 @@ static void ledring_init(void) {
 	TCD0.CTRLA = TC_CLKSEL_DIV256_gc;
 	TCD0.CTRLB = TC0_CCBEN_bm | TC_WGMODE_SS_gc;
 	TCD0.PER = 255;
-	ledring_setbrightness(10);
-}
-
-static void ledring_send(uint32_t led_data) {
-	CS_SetActive();
-	spi_sendbyte(led_data >> 24);
-	spi_sendbyte(led_data >> 16);
-	spi_sendbyte(led_data >> 8);
-	spi_sendbyte(led_data >> 0);
-	CS_SetInactive();
+	ledring_setbrightness(0);
+	ledring_send(0);
 }
 
 static void rs232_init(void) {
@@ -96,9 +120,82 @@ static void rs232_send(uint8_t character) {
 	USARTE0.DATA = character;
 }
 
+static void rs232_send_hex_nibble(uint8_t nibble) {
+	nibble &= 0xf;
+	rs232_send((nibble < 10) ? (nibble + '0') : (nibble - 10 + 'a'));
+}
+
+static void rs232_send_hex_byte(uint8_t byte) {
+	rs232_send_hex_nibble(byte >> 4);
+	rs232_send_hex_nibble(byte >> 0);
+}
+
+static void rs232_send_hex_word(uint16_t word) {
+	rs232_send_hex_byte(word >> 8);
+	rs232_send_hex_byte(word >> 0);
+}
+
+static void timeout_timer_init(void) {
+	/* Timeout after 100ms @ (25 MHz / 256) */
+	/* c 'round(100e-3/(256/25e6))' */
+	TCD1.PER = 9766;
+	TCD1.INTCTRLA = TC_OVFINTLVL_LO_gc;
+	TCD1.CTRLA = TC_CLKSEL_DIV256_gc;
+}
+
+static void timeout_reset(void) {
+	TCD1.CNT = 0;
+}
+
+static bool command_crc_correct(void) {
+	uint16_t crc = 0xffff;
+	const uint8_t *payloadbuf = (const uint8_t*)&rx_command.payload;
+	for (uint8_t i = 0; i < sizeof(rx_command.payload); i++) {
+		crc = _crc_ccitt_update(crc, payloadbuf[i]);
+	}
+	return crc == rx_command.crc;
+}
+
+static void process_command(void) {
+	if (rx_command.payload.eof != EOF_BYTE) {
+		return;
+	}
+
+	if (!command_crc_correct()) {
+		rs232_send('C');
+		return;
+	}
+
+	ledring_send(rx_command.payload.ledring.configuration);
+	ledring_setbrightness(rx_command.payload.ledring.brightness);
+	rs232_send('O');
+}
+
 ISR(USARTE0_RXC_vect) {
 	uint8_t rxed_char = USARTE0.DATA;
-	rs232_send(rxed_char + 1);
+	timeout_reset();
+
+	if (rx_buf_length >= sizeof(rx_command)) {
+		/* Something has gone horribly wrong. */
+		rx_buf_length = 0;
+		return;
+	}
+
+	uint8_t *rx_buf = (uint8_t*)&rx_command;
+	rx_buf[rx_buf_length++] = rxed_char;
+	if ((rx_buf_length == 1) && (rx_command.payload.sof != SOF_BYTE)) {
+		/* Not start-of-frame, discard immediately. */
+		rx_buf_length = 0;
+	} else if (rx_buf_length == sizeof(rx_command)) {
+		/* Command finished */
+		process_command();
+		rx_buf_length = 0;
+	}
+}
+
+ISR(TCD1_OVF_vect) {
+	/* Reset current command */
+	rx_buf_length = 0;
 }
 
 int main(void) {
@@ -107,14 +204,11 @@ int main(void) {
 	clock_configure_ext();
 	rs232_init();
 	ledring_init();
+	timeout_timer_init();
 
 	PMIC.CTRL = PMIC_LOLVLEN_bm;
 	sei();
 
-	uint32_t x = 0xaa550000;
 	while (true) {
-		x++;
-		ledring_send(x);
-		_delay_ms(100);
 	}
 }
