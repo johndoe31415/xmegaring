@@ -31,9 +31,15 @@
 #define SOF_BYTE		0x5a
 #define EOF_BYTE		0xa5
 
+#define ror32_lomask(bits)		((1 << (bits)) - 1)
+#define ror32(value, bits)		((((uint32_t)(value)) >> (bits)) | (((value) & ror32_lomask(bits)) << (32 - (bits))))
+
 struct ledring_config_t {
 	uint8_t brightness;
 	uint32_t configuration;
+	uint8_t fixed_rotation;
+	uint8_t auto_rotation_increment;
+	uint8_t auto_rotation_period;
 } __attribute__ ((packed));
 
 struct rx_command_payload_t {
@@ -47,11 +53,21 @@ struct rx_command_t {
 	uint16_t crc;
 } ;
 
+struct ledring_runtime_t {
+	uint32_t pattern;
+	uint8_t fixed_rotation;
+	uint8_t auto_rotation_accu;
+	uint8_t auto_rotation_increment;
+	uint8_t auto_rotation_count;
+	uint8_t auto_rotation_period;
+};
+
 static struct rx_command_t rx_command;
 static uint8_t rx_buf_length;
+static struct ledring_runtime_t ledring1;
 
-static void spi_sendbyte(uint8_t value) {
-	for (uint8_t i = 0; i < 8; i++) {
+static void spi_senduint32(uint32_t value) {
+	for (uint8_t i = 0; i < 32; i++) {
 		MOSI_SetConditional((value & 1) != 0);
 		SCK_PulseNop();
 		value >>= 1;
@@ -82,10 +98,7 @@ static void ledring_setbrightness(uint8_t brightness) {
 
 static void ledring_send(uint32_t led_data) {
 	CS_SetActive();
-	spi_sendbyte(led_data >> 0);
-	spi_sendbyte(led_data >> 8);
-	spi_sendbyte(led_data >> 16);
-	spi_sendbyte(led_data >> 24);
+	spi_senduint32(led_data);
 	CS_SetInactive();
 }
 
@@ -143,6 +156,14 @@ static void timeout_timer_init(void) {
 	TCD1.CTRLA = TC_CLKSEL_DIV256_gc;
 }
 
+static void rotation_timer_init(void) {
+	/* Timeout after 10ms @ (25 MHz / 256) */
+	/* c 'round(10e-3/(256/25e6))' */
+	TCC1.PER = 977;
+	TCC1.INTCTRLA = TC_OVFINTLVL_LO_gc;
+	TCC1.CTRLA = TC_CLKSEL_DIV256_gc;
+}
+
 static void timeout_reset(void) {
 	TCD1.CNT = 0;
 }
@@ -156,6 +177,13 @@ static bool command_crc_correct(void) {
 	return crc == rx_command.crc;
 }
 
+static void ledring_update(void) {
+	uint32_t value = ledring1.pattern;
+	uint8_t rotation = (ledring1.fixed_rotation + ledring1.auto_rotation_accu) % 32;
+	value = ror32(value, rotation);
+	ledring_send(value);
+}
+
 static void process_command(void) {
 	if (rx_command.payload.eof != EOF_BYTE) {
 		return;
@@ -165,8 +193,13 @@ static void process_command(void) {
 		rs232_send('C');
 		return;
 	}
+	ledring1.pattern = rx_command.payload.ledring.configuration;
+	ledring1.fixed_rotation = rx_command.payload.ledring.fixed_rotation;
+	ledring1.auto_rotation_count = 0;
+	ledring1.auto_rotation_period = rx_command.payload.ledring.auto_rotation_period;
+	ledring1.auto_rotation_increment = rx_command.payload.ledring.auto_rotation_increment;
+	ledring_update();
 
-	ledring_send(rx_command.payload.ledring.configuration);
 	ledring_setbrightness(rx_command.payload.ledring.brightness);
 	rs232_send('O');
 }
@@ -193,6 +226,18 @@ ISR(USARTE0_RXC_vect) {
 	}
 }
 
+ISR(TCC1_OVF_vect) {
+	/* Rotation */
+	if (ledring1.auto_rotation_period) {
+		ledring1.auto_rotation_count++;
+		if (ledring1.auto_rotation_count >= ledring1.auto_rotation_period) {
+			ledring1.auto_rotation_count = 0;
+			ledring1.auto_rotation_accu = (ledring1.auto_rotation_accu + ledring1.auto_rotation_increment) % 32;
+			ledring_update();
+		}
+	}
+}
+
 ISR(TCD1_OVF_vect) {
 	/* Reset current command */
 	rx_buf_length = 0;
@@ -205,6 +250,7 @@ int main(void) {
 	rs232_init();
 	ledring_init();
 	timeout_timer_init();
+	rotation_timer_init();
 
 	PMIC.CTRL = PMIC_LOLVLEN_bm;
 	sei();

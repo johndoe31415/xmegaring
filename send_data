@@ -28,6 +28,9 @@ packet = NamedStruct((
 	("B", "sof"),
 	("B", "ring1_brightness"),
 	("L", "ring1_config"),
+	("B", "ring1_fixed_rotation"),
+	("B", "ring1_auto_rotation_increment"),
+	("B", "ring1_auto_rotation_period"),
 	("B", "eof"),
 	("H", "crc"),
 ))
@@ -46,14 +49,18 @@ def pack_data(payload_data):
 	return frame
 
 data = {
-	"ring1_brightness":		30,
-	"ring1_config":			0x1,
+	"ring1_brightness":					130,
+	"ring1_config":						0x1,
+	"ring1_fixed_rotation":				0,
+	"ring1_auto_rotation_increment":	7,
+	"ring1_auto_rotation_period":		0,
 }
 
 conn = serial.Serial("/dev/ttyUSB0", baudrate = 115200, timeout = 0.25)
 i = 0
+data["ring1_config"] = 0x7
 while True:
 	i = (i + 1) % 32
 	conn.write(pack_data(data))
-	data["ring1_config"] = 1 << i
+	data["ring1_fixed_rotation"] = i
 	print(conn.read(128))
